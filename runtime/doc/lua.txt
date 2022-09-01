@@ -1955,6 +1955,34 @@ uri_to_fname({uri})                                       *vim.uri_to_fname()*
 ==============================================================================
 Lua module: ui                                                        *lua-ui*
 
+confirm({msg}, {opts}, {on_choice})                         *vim.ui.confirm()*
+    Prompts the user to make a choice from available options
+
+    Example: >
+
+     vim.ui.confirm("Favorite whitespace?", { choices = {"Tabs", "Spaces"} }, function(choice)
+         vim.o.expandtab = choice == 2
+     end)
+<
+
+    Parameters: ~
+        {msg}        (string) Text of the prompt.
+        {opts}       (table) Additional options. See |confirm()|
+                     • choices (table|nil) List of strings. The shortcut for
+                       each choice will be the first character of the string.
+                       You can specify a a different shortcut by placing a '&'
+                       before the character. For example: `{"Save", "Save
+                       &All"}`. Defaults to `{"&OK"}`.
+                     • default (integer|nil) The value to use when the user
+                       performs the default select action.
+                     • type (string|nil) The type of the dialog. It can be one
+                       of "Error", "Question", "Info", "Warning", or
+                       "Generic". Only the first character is relevant.
+                       Defaults to "Generic".
+        {on_choice}  (function) ((idx|nil) -> ()) Called once the user makes a
+                     choice. `idx` is the 1-based index of the choice within
+                     `choices`. `0` if the user aborted the dialog.
+
 input({opts}, {on_confirm})                                   *vim.ui.input()*
     Prompts the user for input
 
@@ -1999,8 +2027,8 @@ select({items}, {opts}, {on_choice})                         *vim.ui.select()*
 <
 
     Parameters: ~
-      • {items}      (table) Arbitrary items
-      • {opts}       (table) Additional options
+        {items}      (table) Arbitrary items
+        {opts}       (table|nil) Additional options
                      • prompt (string|nil) Text of the prompt. Defaults to
                        `Select one of:`
                      • format_item (function item -> text) Function to format

@@ -84,4 +84,37 @@ describe('vim.ui', function()
       eq('abcdefg', exec_lua('return result'))
     end)
   end)
+
+  describe('confirm', function()
+    it('can select an option', function()
+      local result = exec_lua[[
+        local opts = {
+          choices = {"Ham", "Eggs"},
+          default = 2,
+          type = "Question",
+        }
+        local choice
+        local on_choice = function(idx)
+          choice = idx
+        end
+        -- confirm would require input and block the test
+        local stub = {}
+        vim.fn.confirm = function(msg, choices, default, type)
+          stub.msg = msg
+          stub.choices = choices
+          stub.default = default
+          stub.type = type
+          return 1
+        end
+        vim.ui.confirm("Message", opts, on_choice)
+        vim.wait(100, function() return choice ~= nil end)
+        return {choice, stub.msg, stub.choices, stub.default, stub.type}
+      ]]
+      eq(1, result[1])
+      eq("Message", result[2])
+      eq("Ham\nEggs", result[3])
+      eq(2, result[4])
+      eq("Question", result[5])
+    end)
+  end)
 end)

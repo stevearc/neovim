@@ -3,7 +3,7 @@ local M = {}
 --- Prompts the user to pick a single item from a collection of entries
 ---
 ---@param items table Arbitrary items
----@param opts table Additional options
+---@param opts table|nil Additional options
 ---     - prompt (string|nil)
 ---               Text of the prompt. Defaults to `Select one of:`
 ---     - format_item (function item -> text)
@@ -94,6 +94,45 @@ function M.input(opts, on_confirm)
   else
     on_confirm(nil)
   end
+end
+
+--- Prompts the user to make a choice from available options
+---
+---@param msg string Text of the prompt.
+---@param opts table Additional options. See |confirm()|
+---     - choices (table|nil)
+---               List of strings. The shortcut for each choice will be the first character of the
+---               string. You can specify a a different shortcut by placing a '&' before the
+---               character. For example: `{"Save", "Save &All"}`. Defaults to `{"&OK"}`.
+---     - default (integer|nil)
+---               The value to use when the user performs the default select action.
+---     - type (string|nil)
+---               The type of the dialog. It can be one of "Error", "Question", "Info", "Warning",
+---               or "Generic". Only the first character is relevant. Defaults to "Generic".
+---@param on_choice function ((idx|nil) -> ())
+---               Called once the user makes a choice. `idx` is the 1-based index of the choice
+---               within `choices`. `0` if the user aborted the dialog.
+---
+--- Example:
+--- <pre>
+--- vim.ui.confirm("Favorite whitespace?", { choices = {"Tabs", "Spaces"} }, function(choice)
+---     vim.o.expandtab = choice == 2
+--- end)
+--- </pre>
+function M.confirm(msg, opts, on_choice)
+  vim.validate({
+    msg = { msg, 'string', false },
+    opts = { opts, 'table', true },
+    on_choice = { on_choice, 'function', false },
+  })
+  opts = vim.tbl_deep_extend('keep', opts or {}, {
+    choices = { '&OK' },
+    default = 1,
+    type = 'Generic',
+  })
+  local choices = table.concat(opts.choices, '\n')
+  local choice = vim.fn.confirm(msg, choices, opts.default, opts.type)
+  on_choice(choice)
 end
 
 return M
