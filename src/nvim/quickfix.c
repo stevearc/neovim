@@ -315,10 +315,11 @@ static int qf_init_process_nextline(qf_list_T *qfl, efm_T *fmt_first, qfstate_T 
 /// @params  newlist  If true, create a new error list
 /// @params  qf_title  If non-NULL, title of the error list
 /// @params  enc  If non-NULL, encoding used to parse errors
+/// @params  directory  If non-NULL, the directory of the error list
 ///
 /// @returns -1 for error, number of errors for success.
 int qf_init(win_T *wp, const char *restrict efile, char *restrict errorformat, int newlist,
-            const char *restrict qf_title, char *restrict enc)
+            const char *restrict qf_title, char *restrict enc, char *qf_directory)
 {
   qf_info_T *qi = &ql_info;
 
@@ -327,7 +328,7 @@ int qf_init(win_T *wp, const char *restrict efile, char *restrict errorformat, i
   }
 
   return qf_init_ext(qi, qi->qf_curlist, (char *)efile, curbuf, NULL, errorformat,
-                     newlist, (linenr_T)0, (linenr_T)0, (char *)qf_title, enc);
+                     newlist, (linenr_T)0, (linenr_T)0, (char *)qf_title, enc, qf_directory);
 }
 
 // Maximum number of bytes allowed per line while reading an errorfile.
@@ -1053,7 +1054,8 @@ static void qf_cleanup_state(qfstate_T *pstate)
 /// @return  -1 for error, number of errors for success.
 static int qf_init_ext(qf_info_T *qi, int qf_idx, const char *restrict efile, buf_T *buf,
                        typval_T *tv, char *restrict errorformat, bool newlist, linenr_T lnumfirst,
-                       linenr_T lnumlast, const char *restrict qf_title, char *restrict enc)
+                       linenr_T lnumlast, const char *restrict qf_title, char *restrict enc, 
+                       char *qf_directory)
   FUNC_ATTR_NONNULL_ARG(1)
 {
   qfstate_T state = { 0 };
@@ -1085,6 +1087,10 @@ static int qf_init_ext(qf_info_T *qi, int qf_idx, const char *restrict efile, bu
     if (!qf_list_empty(qfl)) {
       old_last = qfl->qf_last;
     }
+  }
+
+  if (qf_directory != NULL) {
+    qfl->qf_directory = qf_push_dir(qf_directory, &qfl->qf_dir_stack, false);
   }
 
   char *efm;
@@ -4298,7 +4304,7 @@ void ex_make(exarg_T *eap)
   int res = qf_init(wp, fname, (eap->cmdidx != CMD_make
                                 && eap->cmdidx != CMD_lmake) ? p_gefm : p_efm,
                     (eap->cmdidx != CMD_grepadd && eap->cmdidx != CMD_lgrepadd),
-                    qf_cmdtitle(*eap->cmdlinep), enc);
+                    qf_cmdtitle(*eap->cmdlinep), enc, NULL);
 
   qf_info_T *qi = &ql_info;
   if (wp != NULL) {
@@ -5019,7 +5025,7 @@ void ex_cfile(exarg_T *eap)
   // quickfix list then a new list is created.
   int res = qf_init(wp, (char *)p_ef, p_efm, (eap->cmdidx != CMD_caddfile
                                               && eap->cmdidx != CMD_laddfile),
-                    qf_cmdtitle(*eap->cmdlinep), enc);
+                    qf_cmdtitle(*eap->cmdlinep), enc, NULL);
   if (wp != NULL) {
     qi = GET_LOC_LIST(wp);
     if (qi == NULL) {
@@ -5834,7 +5840,8 @@ enum {
   QF_GETLIST_FILEWINID = 0x200,
   QF_GETLIST_QFBUFNR = 0x400,
   QF_GETLIST_QFTF = 0x800,
-  QF_GETLIST_ALL = 0xFFF,
+  QF_GETLIST_DIRECTORY = 0x1000,
+  QF_GETLIST_ALL = 0xFFFF,
 };
 
 /// Parse text from 'di' and return the quickfix list items.
@@ -5857,11 +5864,21 @@ static int qf_get_list_from_lines(dict_T *what, dictitem_T *di, dict_T *retdict)
       errorformat = efm_di->di_tv.vval.v_string;
     }
 
+    char *qf_directory = NULL;
+    if ((efm_di = tv_dict_find(what, S_LEN("directory"))) != NULL) {
+      if (efm_di->di_tv.v_type != VAR_STRING
+          || efm_di->di_tv.vval.v_string == NULL) {
+        return FAIL;
+      }
+      qf_directory = efm_di->di_tv.vval.v_string;
+    }
+
     list_T *l = tv_list_alloc(kListLenMayKnow);
     qf_info_T *const qi = qf_alloc_stack(QFLT_INTERNAL);
 
     if (qf_init_ext(qi, 0, NULL, NULL, &di->di_tv, errorformat,
-                    true, (linenr_T)0, (linenr_T)0, NULL, NULL) > 0) {
+                    true, (linenr_T)0, (linenr_T)0, NULL, NULL,
+                    qf_directory) > 0) {
       (void)get_errorlist(qi, NULL, 0, 0, l);
       qf_free(&qi->qf_lists[0]);
     }
@@ -5952,6 +5969,9 @@ static int qf_getprop_keys2flags(const dict_T *what, bool loclist)
   }
   if (tv_dict_find(what, S_LEN("quickfixtextfunc")) != NULL) {
     flags |= QF_GETLIST_QFTF;
+  }
+  if (tv_dict_find(what, S_LEN("directory")) != NULL) {
+    flags |= QF_GETLIST_DIRECTORY;
   }
 
   return flags;
@@ -6047,6 +6067,9 @@ static int qf_getprop_defaults(qf_info_T *qi, int flags, int locstack, dict_T *r
   if ((status == OK) && (flags & QF_GETLIST_QFTF)) {
     status = tv_dict_add_str(retdict, S_LEN("quickfixtextfunc"), "");
   }
+  if ((status == OK) && (flags & QF_GETLIST_DIRECTORY)) {
+    status = tv_dict_add_str(retdict, S_LEN("directory"), (const char *)"");
+  }
 
   return status;
 }
@@ -6140,6 +6163,15 @@ static int qf_getprop_qftf(qf_list_T *qfl, dict_T *retdict)
   return status;
 }
 
+/// Return the 'directory' of a quickfix/location list
+/// @return OK or FAIL
+static int qf_getprop_directory(qf_list_T *qfl, dict_T *retdict)
+  FUNC_ATTR_NONNULL_ALL
+{
+  return tv_dict_add_str(retdict, S_LEN("directory"),
+                         (const char *)qfl->qf_directory);
+}
+
 /// Return quickfix/location list details (title) as a dictionary.
 /// 'what' contains the details to return. If 'list_idx' is -1,
 /// then current list is used. Otherwise the specified list is used.
@@ -6217,6 +6249,9 @@ static int qf_get_properties(win_T *wp, dict_T *what, dict_T *retdict)
   }
   if ((status == OK) && (flags & QF_GETLIST_QFTF)) {
     status = qf_getprop_qftf(qfl, retdict);
+  }
+  if ((status == OK) && (flags & QF_GETLIST_DIRECTORY)) {
+    status = qf_getprop_directory(qfl, retdict);
   }
 
   return status;
@@ -6469,6 +6504,7 @@ static int qf_setprop_items_from_lines(qf_info_T *qi, int qf_idx, const dict_T *
   FUNC_ATTR_NONNULL_ALL
 {
   char *errorformat = p_efm;
+  char *qf_directory = NULL;
   dictitem_T *efm_di;
   int retval = FAIL;
 
@@ -6481,6 +6517,14 @@ static int qf_setprop_items_from_lines(qf_info_T *qi, int qf_idx, const dict_T *
     errorformat = efm_di->di_tv.vval.v_string;
   }
 
+  if ((efm_di = tv_dict_find(what, S_LEN("directory"))) != NULL) {
+    if (efm_di->di_tv.v_type != VAR_STRING
+        || efm_di->di_tv.vval.v_string == NULL) {
+      return FAIL;
+    }
+    qf_directory = efm_di->di_tv.vval.v_string;
+  }
+
   // Only a List value is supported
   if (di->di_tv.v_type != VAR_LIST || di->di_tv.vval.v_list == NULL) {
     return FAIL;
@@ -6490,7 +6534,8 @@ static int qf_setprop_items_from_lines(qf_info_T *qi, int qf_idx, const dict_T *
     qf_free_items(&qi->qf_lists[qf_idx]);
   }
   if (qf_init_ext(qi, qf_idx, NULL, NULL, &di->di_tv, errorformat,
-                  false, (linenr_T)0, (linenr_T)0, NULL, NULL) >= 0) {
+                  false, (linenr_T)0, (linenr_T)0, NULL, NULL,
+                  qf_directory) >= 0) {
     retval = OK;
   }
 
@@ -6842,7 +6887,7 @@ void ex_cbuffer(exarg_T *eap)
   int res = qf_init_ext(qi, qi->qf_curlist, NULL, buf, NULL, p_efm,
                         (eap->cmdidx != CMD_caddbuffer
                          && eap->cmdidx != CMD_laddbuffer),
-                        eap->line1, eap->line2, qf_title, NULL);
+                        eap->line1, eap->line2, qf_title, NULL, NULL);
   if (qf_stack_empty(qi)) {
     decr_quickfix_busy();
     return;
@@ -6920,7 +6965,7 @@ void ex_cexpr(exarg_T *eap)
                             (eap->cmdidx != CMD_caddexpr
                              && eap->cmdidx != CMD_laddexpr),
                             (linenr_T)0, (linenr_T)0,
-                            qf_cmdtitle(*eap->cmdlinep), NULL);
+                            qf_cmdtitle(*eap->cmdlinep), NULL, NULL);
       if (qf_stack_empty(qi)) {
         decr_quickfix_busy();
         goto cleanup;
